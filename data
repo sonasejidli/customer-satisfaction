@@ -1,0 +1,651 @@
+import pandas as pd 
+import re
+import matplotlib.pyplot as plt
+data = pd.read_csv("C:\\Users\\MSI\\Desktop\\Layihə\\GroceryDataset.csv")
+print(data.head())
+print({len(data)})
+
+
+from wordcloud import WordCloud
+import nltk
+from nltk.corpus import stopwords
+from sklearn.model_selection import train_test_split
+
+nltk.download('stopwords')
+stop_words = set(stopwords.words('english'))
+stop_words.update(['cookie', 'cake', 'product', 'br', 'ingredients', 'oz', 'pack', 'chocolate'])
+
+
+def extract_rating(rating_text):
+    if pd.isna(rating_text) or "No Reviews" in str(rating_text):
+        return None
+    match = re.search(r"Rated (\d+\.?\d*) out of", str(rating_text))
+    if match:
+        return float(match.group(1))
+    return None
+
+data['real_score'] = data['Rating'].apply(extract_rating)
+
+rated_data = data.dropna(subset=['real_score']).copy() 
+unrated_data = data[data['real_score'].isna()]
+
+print(f"Reytinqi OLAN sətirlər (Modelə gedəcək): {len(rated_data)}")
+print(f"Reytinqi OLMAYAN sətirlər (Silinəcək): {len(unrated_data)}")
+
+
+def create_label(score):
+    if score >= 4.0:
+        return 1
+    else:
+        return 0
+
+rated_data['sentiment_label'] = rated_data['real_score'].apply(create_label)
+
+rated_data['clean_text'] = rated_data['Product Description'].fillna(rated_data['Title'])
+
+print("\n Model üçün Hazır Datanın Paylanması ")
+print(rated_data['sentiment_label'].value_counts())
+
+rated_data['sentiment_label'].value_counts().plot(kind='bar', color=['green', 'red'])
+plt.title("Pozitiv (1) vs Neqativ (0) Paylanması")
+plt.xlabel("Sentiment")
+plt.ylabel("Say")
+plt.show()
+
+print("\n Mənfi Reytinq (Label 0) Nümunələri ")
+print(rated_data[rated_data['sentiment_label'] == 0][['Title', 'real_score']].head())
+
+
+X = rated_data['clean_text'] 
+y = rated_data['sentiment_label']
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, 
+    test_size=0.2, 
+    random_state=42, 
+    stratify=y  
+)
+
+print(f"\nTrain setində '0' sayı: {sum(y_train == 0)}")
+print(f"Test setində '0' sayı: {sum(y_test == 0)}")
+
+
+
+negative_data = rated_data[rated_data['sentiment_label'] == 0]
+if len(negative_data) > 0:
+    neg_text = ' '.join(negative_data['clean_text'].astype(str)).lower()
+    wordcloud_neg = WordCloud(
+        width=800, height=400, 
+        background_color='black', 
+        stopwords=stop_words, 
+        colormap='Reds',
+        max_words=100
+    ).generate(neg_text)
+    
+    plt.figure(figsize=(10, 5))
+    plt.imshow(wordcloud_neg, interpolation='bilinear')
+    plt.axis('off')
+    plt.title(" Mənfi Reytinqli (Label 0) Məhsullarda Açar Sözlər")
+    plt.show()
+
+positive_data = rated_data[rated_data['sentiment_label'] == 1]
+if len(positive_data) > 0:
+    pos_text = ' '.join(positive_data['clean_text'].astype(str)).lower()
+    wordcloud_pos = WordCloud(
+        width=800, height=400, 
+        background_color='white', 
+        stopwords=stop_words, 
+        colormap='Greens',
+        max_words=100
+    ).generate(pos_text)
+    
+    plt.figure(figsize=(10, 5))
+    plt.imshow(wordcloud_pos, interpolation='bilinear')
+    plt.axis('off')
+    plt.title(" Müsbət Reytinqli (Label 1) Məhsullarda Açar Sözlər")
+    plt.show()
+
+
+import seaborn as sns
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
+import nltk
+import matplotlib.pyplot as plt
+
+
+nltk.download('vader_lexicon')
+
+print("VADER analizi ")
+sia = SentimentIntensityAnalyzer()
+
+
+rated_data['vader_score'] = rated_data['clean_text'].apply(lambda x: sia.polarity_scores(str(x))['compound'])
+
+plt.figure(figsize=(14, 6))
+
+# Qrafik A: VADER-in Təxmin Etdiyi Sentiment Paylanması
+plt.subplot(1, 2, 1)
+sns.histplot(rated_data['vader_score'], bins=20, kde=True, color='purple')
+plt.title('Təxmini Sentiment Paylanması (VADER Xalları)')
+plt.xlabel('Sentiment Xalı (-1 = Çox Pis, +1 = Çox Yaxşı)')
+plt.ylabel('Sətir Sayı')
+plt.axvline(x=0, color='red', linestyle='--', label='Neytral (0)') # Mərkəz xətti
+plt.legend()
+
+# Qrafik B: Real Müştəri Reytinqlərinin Paylanması
+plt.subplot(1, 2, 2)
+sns.histplot(rated_data['real_score'], bins=5, kde=False, color='orange', discrete=True)
+plt.title('Real Müştəri Reytinqləri ')
+plt.xlabel('Ulduz (1-dən 5-ə qədər)')
+plt.ylabel('Sətir Sayı')
+plt.xticks([1, 2, 3, 4, 5]) # X oxunda yalnız tam rəqəmlər olsun
+
+plt.tight_layout()
+plt.show()
+
+
+print("\n Nəticə Statistikası ")
+print(f"Ortalama VADER Xalı: {rated_data['vader_score'].mean():.3f}")
+print(f"Ən Yüksək Sentiment: {rated_data['vader_score'].max()}")
+print(f"Ən Aşağı Sentiment: {rated_data['vader_score'].min()}")
+
+
+import seaborn as sns
+from collections import Counter
+import re
+
+nltk.download('stopwords')
+stop_words = set(stopwords.words('english'))
+custom_stops = ['cookie', 'cake', 'product', 'br', 'ingredients', 'oz', 'pack', 'chocolate', 'flavor', 'box', 'total', 'lb', 'lbs', 'bag', 'mix', 'water', 'sugar']
+stop_words.update(custom_stops)
+
+print("Mətnlər analiz edilir")
+
+
+all_text = ' '.join(rated_data['clean_text'].astype(str)).lower()
+
+words = re.findall(r'\b[a-z]{3,}\b', all_text) 
+
+filtered_words = [word for word in words if word not in stop_words]
+
+word_counts = Counter(filtered_words)
+top_10_words = word_counts.most_common(10)
+top_words_df = pd.DataFrame(top_10_words, columns=['Söz', 'Tezlik'])
+
+print("\n Ən Çox İşlənən 10 Söz (Top 10) ")
+print(top_words_df)
+
+
+plt.figure(figsize=(12, 6))
+sns.barplot(x='Tezlik', y='Söz', data=top_words_df, palette='viridis')
+plt.title('Məhsul Təsvirlərində Ən Çox İşlənən 10 Söz')
+plt.xlabel('İşlənmə Sayı')
+plt.ylabel('Açar Sözlər')
+plt.show()
+
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+from collections import Counter
+from itertools import combinations
+import numpy as np
+import re
+import nltk
+from nltk.corpus import stopwords
+
+nltk.download('stopwords')
+stop_words = set(stopwords.words('english'))
+custom_stops = ['cookie', 'cake', 'product', 'br', 'ingredients', 'oz', 'pack', 'chocolate', 'flavor', 'box', 'total', 'lb', 'lbs', 'bag', 'mix', 'water', 'sugar', 'cup', 'net', 'weight']
+stop_words.update(custom_stops)
+
+print("Söz əlaqələri ")
+
+
+sentences = rated_data['clean_text'].astype(str).str.lower().apply(lambda x: re.findall(r'\b[a-z]{3,}\b', x))
+
+all_words = [word for sentence in sentences for word in sentence if word not in stop_words]
+top_30_words = [word for word, count in Counter(all_words).most_common(30)]
+
+co_matrix = pd.DataFrame(0, index=top_30_words, columns=top_30_words)
+
+for sentence in sentences:
+    
+    common_words = list(set([w for w in sentence if w in top_30_words]))
+    
+    
+    for word1, word2 in combinations(common_words, 2):
+        co_matrix.loc[word1, word2] += 1
+        co_matrix.loc[word2, word1] += 1  
+
+
+np.fill_diagonal(co_matrix.values, 0)
+
+
+plt.figure(figsize=(14, 12))
+sns.heatmap(co_matrix, annot=False, cmap="YlOrRd", linewidths=.5)
+plt.title('Müştəri Rəylərində Top 30 Sözün Birlikdə İşlənmə Tezliyi (Co-occurrence Heatmap)', fontsize=16)
+plt.show()
+
+
+label_counts = rated_data['sentiment_label'].value_counts()
+
+plt.figure(figsize=(8, 8))
+
+colors = ['#66b3ff', '#ff9999'] 
+
+plt.pie(
+    label_counts, 
+    labels=['Pozitiv (1)', 'Neqativ (0)'] if label_counts.index[0] == 1 else ['Neqativ (0)', 'Pozitiv (1)'],
+    autopct='%1.1f%%', 
+    startangle=140, 
+    colors=colors,
+    explode=(0.1, 0), 
+    shadow=True
+)
+
+plt.title('Müştəri Rəylərinin Sentiment Paylanması')
+plt.show()
+
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
+import seaborn as sns
+import gensim
+from gensim import corpora
+from nltk.stem import WordNetLemmatizer
+import nltk
+import re
+
+
+nltk.download('wordnet')
+nltk.download('omw-1.4')
+
+print("LDA Modeli ")
+
+lemmatizer = WordNetLemmatizer()
+
+
+def preprocess_for_lda(text):
+    tokens = re.findall(r'\b[a-z]{3,}\b', str(text).lower())
+    return [lemmatizer.lemmatize(token) for token in tokens if token not in stop_words]
+
+
+if 'rated_data' not in locals():
+    rated_data = data.dropna(subset=['real_score']).copy()
+    rated_data['clean_text'] = rated_data['Product Description'].fillna(rated_data['Title'])
+
+processed_docs = rated_data['clean_text'].apply(preprocess_for_lda)
+
+dictionary = corpora.Dictionary(processed_docs)
+dictionary.filter_extremes(no_below=2, no_above=0.9)
+corpus = [dictionary.doc2bow(doc) for doc in processed_docs]
+
+lda_model = gensim.models.LdaModel(
+    corpus=corpus,
+    id2word=dictionary,
+    num_topics=3, 
+    random_state=42,
+    passes=10,
+    alpha='auto'
+)
+
+cols = [color for name, color in mcolors.TABLEAU_COLORS.items()]
+
+fig, axes = plt.subplots(1, 3, figsize=(16, 6), sharey=True)
+
+for i, ax in enumerate(axes.flatten()):
+    fig.add_subplot(ax)
+    
+    topic_words = dict(lda_model.show_topic(i, 10))
+    
+    
+    ax.bar(topic_words.keys(), topic_words.values(), color=cols[i % len(cols)])
+    ax.set_title(f'Mövzu {i} - Açar Sözlər', fontsize=14)
+    ax.tick_params(axis='x', labelrotation=45)
+
+plt.suptitle('LDA Analizi: Müştəri Rəylərindəki Gizli Mövzular', fontsize=20)
+plt.tight_layout()
+plt.show()
+
+
+from sklearn.model_selection import train_test_split
+from sklearn.utils import resample
+import pandas as pd
+X = rated_data['clean_text']
+y = rated_data['sentiment_label']
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, 
+    test_size=0.2, 
+    random_state=42, 
+    stratify=y
+)
+
+print(f"Splitdən sonra Orijinal Train Set:\n{y_train.value_counts()}")
+train_data = pd.concat([X_train, y_train], axis=1)
+
+
+negative_train = train_data[train_data.sentiment_label == 0] 
+positive_train = train_data[train_data.sentiment_label == 1] 
+
+
+negative_upsampled = resample(
+    negative_train,
+    replace=True,     
+    n_samples=len(positive_train), 
+    random_state=42
+)
+
+train_balanced = pd.concat([positive_train, negative_upsampled])
+
+X_train_final = train_balanced['clean_text']
+y_train_final = train_balanced['sentiment_label']
+X_test_final = X_test
+y_test_final = y_test
+
+print("\n Modelə gedəcək data")
+print(y_train_final.value_counts())
+
+print("\n Test ")
+print(y_test_final.value_counts())
+
+
+
+
+import torch
+from transformers import BertTokenizer, BertForSequenceClassification
+from torch.utils.data import DataLoader, TensorDataset
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Modelin işləyəcəyi cihaz: {device}")
+
+if device.type == 'cuda':
+    print(f"GPU Adı: {torch.cuda.get_device_name(0)}")
+
+print("BERT Tokenizer ")
+
+tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+
+
+def bert_encoding(texts, labels, max_len=128):
+    
+    encoded = tokenizer.batch_encode_plus(
+        texts.astype(str).tolist(), 
+        add_special_tokens=True,    
+        max_length=max_len,         
+        padding='max_length',      
+        truncation=True,           
+        return_attention_mask=True,
+        return_tensors='pt'        
+    )
+    
+    
+    dataset = TensorDataset(
+        encoded['input_ids'],
+        encoded['attention_mask'],
+        torch.tensor(labels.tolist()) 
+    )
+    
+    return dataset
+
+print("Train və Test dataları ")
+
+
+train_dataset = bert_encoding(X_train_final, y_train_final)
+test_dataset = bert_encoding(X_test_final, y_test_final)
+
+
+batch_size = 16 
+
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+print("DataLoaders ")
+
+
+
+model = BertForSequenceClassification.from_pretrained(
+    'bert-base-uncased',
+    num_labels=2, 
+    output_attentions=False,
+    output_hidden_states=False
+)
+
+model.to(device)
+
+
+print(f"Train batches: {len(train_loader)}")
+print(f"Test batches: {len(test_loader)}")
+print("Modelin Arxitekturası:")
+print(model)
+print("\n Classifier ")
+print(f"Giriş (BERT-dən gələn): {model.classifier.in_features} xüsusiyyət")
+print(f"Çıxış : {model.classifier.out_features} sinif (0 və 1)")
+
+
+total_params = sum(p.numel() for p in model.parameters())
+trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+print(f"\nÜmumi Parametrlər: {total_params:,}")
+print(f"Öyrədiləcək  Parametrlər: {trainable_params:,}")
+
+
+from torch.optim import AdamW
+from transformers import get_linear_schedule_with_warmup
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+import numpy as np
+
+
+optimizer = AdamW(model.parameters(), lr=2e-5)
+
+
+epochs = 2 
+
+
+total_steps = len(train_loader) * epochs
+print(f"Planlaşdırılan ümumi addım sayı: {total_steps}")
+
+
+scheduler = get_linear_schedule_with_warmup(
+    optimizer,                 
+    num_warmup_steps=0,        
+    num_training_steps=total_steps
+)
+
+def compute_metrics(preds, labels):
+    pred_flat = np.argmax(preds, axis=1).flatten()
+    labels_flat = labels.flatten()
+
+    acc = accuracy_score(labels_flat, pred_flat)
+    f1 = f1_score(labels_flat, pred_flat, zero_division=0)
+    precision = precision_score(labels_flat, pred_flat, zero_division=0)
+    recall = recall_score(labels_flat, pred_flat, zero_division=0)
+
+    return {
+        'accuracy': acc,
+        'f1': f1,
+        'precision': precision,
+        'recall': recall
+    }
+
+print("Optimizer, Scheduler və Metriklər quruldu.")
+
+
+import time
+import datetime
+import torch
+
+def format_time(elapsed):
+    elapsed_rounded = int(round((elapsed)))
+    return str(datetime.timedelta(seconds=elapsed_rounded))
+
+print("epochs")
+total_t0 = time.time()
+
+
+training_stats = []
+
+for epoch_i in range(0, epochs):
+    
+    print(f'\n {epoch_i + 1} / {epochs} ')
+
+    t0 = time.time()
+    total_train_loss = 0
+    model.train() 
+
+    for step, batch in enumerate(train_loader):
+        
+        if step % 10 == 0 and not step == 0:
+            elapsed = format_time(time.time() - t0)
+            print(f'  Batch {step} / {len(train_loader)}.  Keçən vaxt: {elapsed}')
+
+        
+        b_input_ids = batch[0].to(device)
+        b_input_mask = batch[1].to(device)
+        b_labels = batch[2].to(device)
+
+        model.zero_grad()        
+
+        
+        result = model(b_input_ids, 
+                       token_type_ids=None, 
+                       attention_mask=b_input_mask, 
+                       labels=b_labels)
+        
+        loss = result.loss
+        total_train_loss += loss.item()
+
+        
+        loss.backward()
+        
+        
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+
+    
+        optimizer.step()
+        scheduler.step()
+
+    avg_train_loss = total_train_loss / len(train_loader)            
+    training_time = format_time(time.time() - t0)
+
+    print(f"\n  Ortalama Məşq İtkisi (Loss): {avg_train_loss:.2f}")
+    print(f"  Məşq müddəti: {training_time}")
+    print('\nTest edilir (Validation)...')
+
+    t0 = time.time()
+    model.eval() 
+    all_preds = []
+    all_labels = []
+
+    for batch in test_loader:
+        b_input_ids = batch[0].to(device)
+        b_input_mask = batch[1].to(device)
+        b_labels = batch[2].to(device)
+        
+        with torch.no_grad():        
+            result = model(b_input_ids, 
+                           token_type_ids=None, 
+                           attention_mask=b_input_mask,
+                           labels=b_labels)
+            
+        logits = result.logits
+        logits = logits.detach().cpu().numpy()
+        label_ids = b_labels.to('cpu').numpy()
+        
+        all_preds.append(logits)
+        all_labels.append(label_ids)
+
+    all_preds = np.concatenate(all_preds, axis=0)
+    all_labels = np.concatenate(all_labels, axis=0)
+    eval_metrics = compute_metrics(all_preds, all_labels)
+    
+    print("  Nəticələr:")
+    print(f"  Accuracy: {eval_metrics['accuracy']:.2f}")
+    print(f"  F1 Score: {eval_metrics['f1']:.2f}")
+    print(f"  Precision: {eval_metrics['precision']:.2f}")
+    print(f"  Recall: {eval_metrics['recall']:.2f}")
+
+
+print(f"Cəmi vaxt: {format_time(time.time() - total_t0)}")
+
+
+from sklearn.metrics import classification_report, confusion_matrix
+import seaborn as sns
+import matplotlib.pyplot as plt
+import numpy as np
+
+model.eval()
+y_predictions = []
+y_true = []
+
+for batch in test_loader:
+    b_input_ids = batch[0].to(device)
+    b_input_mask = batch[1].to(device)
+    b_labels = batch[2].to(device)
+    
+    with torch.no_grad():
+        result = model(b_input_ids, 
+                       token_type_ids=None, 
+                       attention_mask=b_input_mask)
+    
+    logits = result.logits
+    logits = logits.detach().cpu().numpy()
+    label_ids = b_labels.to('cpu').numpy()
+    y_predictions.extend(np.argmax(logits, axis=1).flatten())
+    y_true.extend(label_ids.flatten())
+
+cm = confusion_matrix(y_true, y_predictions)
+
+plt.figure(figsize=(6, 5))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+            xticklabels=['Təxmin: Pis (0)', 'Təxmin: Yaxşı (1)'], 
+            yticklabels=['Real: Pis (0)', 'Real: Yaxşı (1)'])
+plt.ylabel('Həqiqi Etiket')
+plt.xlabel('Modelin Təxmini')
+plt.title('BERT Modelinin Yekun Performansı')
+plt.show()
+
+print(classification_report(y_true, y_predictions, target_names=['Neqativ (0)', 'Pozitiv (1)']))
+
+
+from sklearn.metrics import classification_report, confusion_matrix
+import torch
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+
+
+model.eval()
+all_probs = []
+all_labels = []
+
+for batch in test_loader:
+    b_input_ids = batch[0].to(device)
+    b_input_mask = batch[1].to(device)
+    b_labels = batch[2].to(device)
+    
+    with torch.no_grad():
+        result = model(b_input_ids, 
+                       token_type_ids=None, 
+                       attention_mask=b_input_mask)
+    
+    logits = result.logits
+    probs = torch.nn.functional.softmax(logits, dim=1)
+    
+    all_probs.extend(probs[:, 1].detach().cpu().numpy()) 
+    all_labels.extend(b_labels.to('cpu').numpy())
+
+all_probs = np.array(all_probs)
+all_labels = np.array(all_labels)
+
+NEW_THRESHOLD = 0.80  
+
+y_pred_new = (all_probs > NEW_THRESHOLD).astype(int)
+print(classification_report(all_labels, y_pred_new, target_names=['Neqativ (0)', 'Pozitiv (1)']))
+
+
+cm = confusion_matrix(all_labels, y_pred_new)
+plt.figure(figsize=(6, 5))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Reds')
+plt.title(f'Yeni Confusion Matrix (Threshold {NEW_THRESHOLD})')
+plt.ylabel('Həqiqi Etiket')
+plt.xlabel('Modelin Təxmini')
+plt.show()
